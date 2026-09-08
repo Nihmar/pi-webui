@@ -45,6 +45,8 @@ const en = {
   noModelC: "locally.",
   noCreds: "The UI will not ask for credentials.",
 
+  settings: "Settings",
+  toolNoOutput: "No saved output for this call.",
   model: "Model",
   modelDefault: "(default)",
   thinking: "Thinking",
@@ -133,6 +135,8 @@ const it: typeof en = {
   noModelC: "in locale.",
   noCreds: "L'interfaccia non chiederà credenziali.",
 
+  settings: "Impostazioni",
+  toolNoOutput: "Nessun output salvato per questa chiamata.",
   model: "Modello",
   modelDefault: "(predefinito)",
   thinking: "Ragionamento",

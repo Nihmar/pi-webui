@@ -44,11 +44,12 @@ test.describe("mobile flow", () => {
     await send.click();
     await expect(page.getByText(/Echo:/).first()).toBeVisible({ timeout: 10000 });
 
-    // controls wrap on small width (no horizontal overflow)
-    const controls = page.locator(".controls");
-    await expect(controls).toBeVisible();
+    // settings live behind the composer's sliders button; open and check no overflow
+    await page.getByRole("button", { name: /settings/i }).click();
+    const panel = page.locator(".settings-panel");
+    await expect(panel).toBeVisible();
     const vw = page.viewportSize()?.width ?? 390;
-    const cb = await controls.boundingBox();
-    expect(cb?.width).toBeLessThanOrEqual(vw + 2);
+    const pb = await panel.boundingBox();
+    expect(pb?.width).toBeLessThanOrEqual(vw + 2);
   });
 });

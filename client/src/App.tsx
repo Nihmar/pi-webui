@@ -47,6 +47,8 @@ const ICON_REASON = (<><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 
 const ICON_TOOL = (<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.1-.6-.6-2.1z" />);
 const ICON_CHEV = (<polyline points="9 18 15 12 9 6" />);
 const ICON_SEND = (<><line x1="12" y1="19" x2="12" y2="5" /><polyline points="6 11 12 5 18 11" /></>);
+const ICON_MENU = (<><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>);
+const ICON_SLIDERS = (<><line x1="4" y1="8" x2="20" y2="8" /><circle cx="9" cy="8" r="2.3" /><line x1="4" y1="16" x2="20" y2="16" /><circle cx="15" cy="16" r="2.3" /></>);
 
 function useIsMobile(): boolean {
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 820);
@@ -172,6 +174,7 @@ export default function App(): React.ReactElement {
   const [showJump, setShowJump] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -404,7 +407,7 @@ export default function App(): React.ReactElement {
       <header className="topbar">
         {isMobile && (
           <button ref={menuBtnRef} className="menu-btn" aria-label={t("ariaOpenMenu")} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}>
-            ☰ {t("menu")}
+            <Icon path={ICON_MENU} size={20} />
           </button>
         )}
         <div className="brand"><PiLogo className="pi-mark" /> Pi Web UI</div>
@@ -504,47 +507,6 @@ export default function App(): React.ReactElement {
           )}
           {workspaceId && chatId && snapshot && (
             <>
-              <div className="controls" role="toolbar" aria-label={t("ariaChatControls")}>
-                <label>
-                  {t("model")}
-                  <select
-                    value={snapshot.model ? `${snapshot.model.provider}/${snapshot.model.id}` : ""}
-                    disabled={busy}
-                    onChange={(e) => {
-                      const [provider, ...rest] = e.target.value.split("/");
-                      const id = rest.join("/");
-                      if (provider && id) void doConfig({ model: { provider, id } });
-                    }}
-                  >
-                    <option value="">{t("modelDefault")}</option>
-                    {models.map((m) => (
-                      <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                        {m.provider}/{m.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t("thinking")}
-                  <select value={snapshot.thinking ?? "medium"} disabled={busy} onChange={(e) => void doConfig({ thinking: e.target.value as ThinkingLevel })}>
-                    {THINKING_LEVELS.map((lvl) => (
-                      <option key={lvl} value={lvl}>{lvl}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t("tools")}
-                  <select value={snapshot.toolMode} disabled={busy} onChange={(e) => void doConfig({ toolMode: e.target.value as ToolMode })} title={t("toolTitle")}>
-                    <option value="readonly">{t("readonly")}</option>
-                    <option value="full">{t("full")}</option>
-                  </select>
-                </label>
-                <span className="tool-hint">{t("toolHint")}</span>
-                <button className="btn" onClick={() => { setRenameValue(snapshot.sessionName ?? ""); setRenameOpen(true); }} disabled={busy}>{t("rename")}</button>
-                <button className="btn" onClick={() => void compactChat(chatId).then(() => fetchSnapshot(chatId).then(({ snapshot: s }) => setSnapshot(s)))} disabled={busy}>{t("compact")}</button>
-                {queueCount > 0 && <span className="queue" aria-live="polite">{t("queued")} {queueCount}</span>}
-              </div>
-
               {actionError && <div className="error" role="alert">{t("actionFailed")}{actionError}</div>}
               {conn !== "connected" && <div className="warn" role="status">SSE {conn} {t("sseRetry")}</div>}
 
@@ -586,7 +548,60 @@ export default function App(): React.ReactElement {
                     ))}
                   </ul>
                 )}
+                {settingsOpen && (
+                  <div className="settings-panel" role="group" aria-label={t("ariaChatControls")}>
+                    <label className="settings-row">
+                      <span>{t("model")}</span>
+                      <select
+                        value={snapshot.model ? `${snapshot.model.provider}/${snapshot.model.id}` : ""}
+                        disabled={busy}
+                        onChange={(e) => {
+                          const [provider, ...rest] = e.target.value.split("/");
+                          const id = rest.join("/");
+                          if (provider && id) void doConfig({ model: { provider, id } });
+                        }}
+                      >
+                        <option value="">{t("modelDefault")}</option>
+                        {models.map((m) => (
+                          <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+                            {m.provider}/{m.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="settings-row">
+                      <span>{t("thinking")}</span>
+                      <select value={snapshot.thinking ?? "medium"} disabled={busy} onChange={(e) => void doConfig({ thinking: e.target.value as ThinkingLevel })}>
+                        {THINKING_LEVELS.map((lvl) => (
+                          <option key={lvl} value={lvl}>{lvl}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="settings-row">
+                      <span>{t("tools")}</span>
+                      <select value={snapshot.toolMode} disabled={busy} onChange={(e) => void doConfig({ toolMode: e.target.value as ToolMode })} title={t("toolTitle")}>
+                        <option value="readonly">{t("readonly")}</option>
+                        <option value="full">{t("full")}</option>
+                      </select>
+                    </label>
+                    <div className="settings-hint">{t("toolHint")}</div>
+                    <div className="settings-actions">
+                      <button className="btn" onClick={() => { setRenameValue(snapshot.sessionName ?? ""); setRenameOpen(true); setSettingsOpen(false); }} disabled={busy}>{t("rename")}</button>
+                      <button className="btn" onClick={() => void compactChat(chatId).then(() => fetchSnapshot(chatId).then(({ snapshot: s }) => setSnapshot(s)))} disabled={busy}>{t("compact")}</button>
+                    </div>
+                  </div>
+                )}
                 <div className="composer">
+                  <button
+                    type="button"
+                    className={`composer-btn ${settingsOpen ? "on" : ""}`}
+                    aria-label={t("settings")}
+                    aria-expanded={settingsOpen}
+                    title={t("settings")}
+                    onClick={() => setSettingsOpen((o) => !o)}
+                  >
+                    <Icon path={ICON_SLIDERS} size={19} />
+                  </button>
                   <textarea
                     ref={textareaRef}
                     value={composer}
@@ -715,6 +730,7 @@ function ToolItem({ item }: { item: Extract<ChatItem, { kind: "tool" }> }): Reac
   const args = item.argsSummary.startsWith(item.toolName)
     ? item.argsSummary.slice(item.toolName.length).trim()
     : item.argsSummary;
+  const noOutput = !item.preview || item.preview === "[tool call]" || item.preview === "[tool result]" || item.preview === "running…";
   return (
     <details className="rz tool" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
@@ -727,7 +743,7 @@ function ToolItem({ item }: { item: Extract<ChatItem, { kind: "tool" }> }): Reac
         </span>
         <span className="chev"><Icon path={ICON_CHEV} size={16} /></span>
       </summary>
-      <div className="tool-body">{item.preview}</div>
+      <div className="tool-body">{noOutput ? <span className="tool-empty">{t("toolNoOutput")}</span> : item.preview}</div>
     </details>
   );
 }

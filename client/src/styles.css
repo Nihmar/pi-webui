@@ -65,6 +65,8 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; font-size: 15px; }
 .brand .pi-mark { width: 22px; height: 22px; color: var(--text); flex: none; }
+.menu-btn { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 50%; border: 1px solid var(--hair); background: var(--surface); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.menu-btn:hover { background: var(--surface-2); color: var(--text); }
 .conn {
   margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
   font-size: 12.5px; color: var(--muted); font-weight: 500; text-transform: capitalize;
@@ -287,6 +289,20 @@ details.rz[open] > summary .chev { transform: rotate(90deg); }
 .composer .send.danger { background: var(--err); color: #fff; }
 .composer-hint { max-width: 800px; margin: 9px auto 0; text-align: center; font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
 
+.composer .composer-btn { flex: none; width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 50%; border: none; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; align-self: flex-end; }
+.composer .composer-btn:hover { background: var(--surface-3); color: var(--text); }
+.composer .composer-btn.on { color: var(--accent); background: var(--accent-dim); }
+
+/* Settings popover (opened by the sliders button in the composer) */
+.settings-panel { max-width: 800px; margin: 0 auto 10px; border: 1px solid var(--hair); border-radius: var(--radius); background: var(--surface); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22); padding: 12px 14px; display: flex; flex-direction: column; gap: 11px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.settings-row > span { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.settings-row select { flex: 0 1 220px; min-width: 0; }
+.settings-hint { font-size: 11.5px; color: var(--faint); }
+.settings-actions { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--hair); }
+.settings-actions .btn { flex: 1; }
+.tool-empty { color: var(--faint); font-style: italic; }
+
 /* slash menu */
 .slash { max-width: 800px; margin: 0 auto 8px; list-style: none; padding: 4px; border: 1px solid var(--hair); border-radius: var(--radius-sm); background: var(--surface); max-height: 220px; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18); }
 .slash li { }
@@ -301,7 +317,6 @@ details.rz[open] > summary .chev { transform: rotate(90deg); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ---------- Mobile drawer ---------- */
-.menu-btn { min-height: 40px; padding: 8px 12px; }
 .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 20; }
 @media (max-width: 820px) {
   .sidebar {
