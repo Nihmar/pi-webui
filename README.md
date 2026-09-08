@@ -57,7 +57,7 @@ browser (React) ──same-origin──> Express (one process)
 - `src/shared/protocol.ts` — browser-safe Zod schemas + `ServerEvent` union (snapshot, run_status, item_added/updated, assistant/thinking delta/end, tool_start/update/end, queue_update, notice, extension_request/resolved, session_meta), URL policy (`http/https/mailto` + relative only), `truncatePreview` (4000 chars), `redactSecrets`.
 - `src/server/adapter.ts` — `PiAdapter` + `ChatHandle` interface (replaceable by fake in tests).
 - `src/server/fake-adapter.ts` — deterministic, no tokens. Supports stream, tools, steer/follow-up queue, abort/clear, compact, extension confirm round-trip, bounded previews, stale-event rejection via run/generation IDs, SSE replay buffer (last 200), single-writer attach.
-- `src/server/real-adapter.ts` — one `createAgentSession` per live web chat (no `createAgentSessionRuntime` replacement needed for multi-chat). Uses `agent_settled` as primary settled signal with `prompt()` promise fallback; never completes on `message_end`/`agent_end`. `preflightResult` returns HTTP 202 on accept/queue. Idle sends via `prompt()`, busy via `steer()`/`followUp()`. Stop = `clearQueue()` + `abort()`, stays `stopping` until settled. Tools via `setActiveToolsByName` (readonly `read,grep,find,ls` default; full = all configured incl. extensions). Extension UI bridged with mode `rpc` (`select/confirm/input/editor/notify/setStatus`; TUI-only `custom()` returns safe fallback + notice, never auto-confirms).
+- `src/server/real-adapter.ts` — one `createAgentSession` per live web chat (no `createAgentSessionRuntime` replacement needed for multi-chat). Uses `agent_settled` as primary settled signal with `prompt()` promise fallback; never completes on `message_end`/`agent_end`. `preflightResult` returns HTTP 202 on accept/queue. Idle sends via `prompt()`, busy via `steer()`/`followUp()`. Stop = `clearQueue()` + `abort()`, stays `stopping` until settled. Tools via `setActiveToolsByName` (readonly `read,grep,find,ls` default; full = all configured incl. extensions). Extension UI bridged with mode `rpc` (`select/confirm/input/editor/notify/setStatus`; TUI-only `custom()` returns safe fallback + notice, never auto-confirms). Passes Pi's built-in extension factories (e.g. `llama.cpp`) via `resourceLoaderOptions.extensionFactories` — the SDK omits them by default and only the CLI adds them, so without this local/extension providers would never register (resolved through public `getPackageDir()`; pinned to Pi 0.85.1).
 - `src/server/app.ts` — typed routes, SSE with snapshot on connect + `Last-Event-ID` replay/resnapshot, reconcile by stable item IDs.
 - `src/server/security.ts`, `workspaces.ts` — see Security below.
 - `client/` — sidebar (260–300px desktop, drawer <820px with scrim/Escape/focus), controls, conversation (GFM no-raw-HTML, collapsible thinking/tools, queue, notices, autoscroll within 96px + Jump to latest), composer (growing textarea, draft persisted, Enter=send on desktop / Shift+Enter newline, Send→Stop while busy, Steer/Follow-up + queued count, config disabled while busy), extension dialogs, Connected/Reconnecting/Disconnected.
@@ -83,6 +83,36 @@ Project trust follows Pi semantics (`~/.pi/agent/trust.json`, `defaultProjectTru
 > Project-local resources were skipped pending trust. Approve trust by running `pi` in this project and choosing to trust it.
 
 Context files (`AGENTS.md`/`CLAUDE.md`) load per Pi rules regardless of trust unless disabled. Use `pi --approve/-a` or `--no-approve/-na` for one-run overrides in the terminal, not the browser.
+
+## Local models (llama.cpp)
+
+Pi talks to a local [llama.cpp router server](https://github.com/ggml-org/llama.cpp) (`llama-server` in router mode — started **without** `--model`/`-m`/`-hf`):
+
+```bash
+llama-server \
+  --models-dir ~/models \
+  --no-models-autoload \
+  --jinja \
+  --host 127.0.0.1 \
+  --port 8080 \
+  -ngl 999 \
+  -c 32768
+```
+
+Single `.gguf` files sit directly in `--models-dir`; multimodal/multi-shard models each in their own subdirectory. Restart the router after adding files by hand. Keep `--host 127.0.0.1` (local-only). Any port works — this machine uses `8181` (`llama serve`); just point Pi at whatever you chose. Check reachability with `curl http://127.0.0.1:<port>/health` and `/models`.
+
+Point Pi at it (once, in any terminal — the dashboard reuses the same stored auth, no browser login):
+
+```text
+pi
+/login llama.cpp
+```
+
+Enter the exact router URL, e.g. `http://127.0.0.1:8181` (no trailing slash); API key only if the server uses `--api-key`. Then `/llama` (load/unload, download from Hugging Face) and `/model` (only *loaded* models appear — select one). Alternative without stored login: `export LLAMA_BASE_URL=http://127.0.0.1:8181` in the **same** shell that runs the dashboard (env vars don't cross terminals; stored `/login` is preferred).
+
+Dashboard notes: the Model dropdown lists Pi's authenticated models including `llama.cpp/...` — reopen the workspace to refresh after `/login`. Set Thinking to `off` (local models report no reasoning; Pi clamps anyway). If selecting a model errors, load it first via `/llama` in terminal `pi`.
+
+Known quirks (Pi 0.85.1, not this app): `pi auth check --provider llama.cpp` reports `provider_not_found` because that command path doesn't load extensions — ignore it and trust `/llama` + the dashboard dropdown instead. The server loads Pi's built-in provider extension explicitly (see Architecture); without that, `llama.cpp` models never appear even with correct login.
 
 ## Security
 
@@ -150,6 +180,9 @@ tail -f logs/pi-web-ui.log           # logs (gitignored; truncate when large)
 - `host not allowed` → add Serve hostname to `ALLOWED_HOSTS`.
 - `missing or invalid CSRF token` → `GET /api/bootstrap` first; mutations need `x-pi-csrf`.
 - `No authenticated model` → run `pi` + `/login` locally; no browser login form by design.
+- `llama.cpp` models missing from the dropdown → complete `/login llama.cpp` with the exact router URL (terminal `pi`), then reopen the workspace in the dashboard. `pi auth check --provider llama.cpp` saying `provider_not_found` is a Pi CLI quirk — ignore it.
+- `llama.cpp` model errors on send → load it first via `/llama` in terminal `pi` (only loaded models run), then resend.
+- Router unreachable (`/llama` shows Retry/Close) → check `curl <url>/health`, `--models-dir` layout, router-mode start (no `--model`), and restart the router.
 - `session is already open` → second resume attaches to the same live `chatId` (no second writer); use that chat.
 - Empty new sessions may not list until the first message (Pi persists on first append).
 - `SDK initialization failure` / model errors surface as actionable notices in the conversation, not silent failures.
