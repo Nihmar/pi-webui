@@ -110,7 +110,11 @@ pi
 
 Enter the exact router URL, e.g. `http://127.0.0.1:8181` (no trailing slash); API key only if the server uses `--api-key`. Then `/llama` (load/unload, download from Hugging Face) and `/model` (only *loaded* models appear — select one). Alternative without stored login: `export LLAMA_BASE_URL=http://127.0.0.1:8181` in the **same** shell that runs the dashboard (env vars don't cross terminals; stored `/login` is preferred).
 
-Dashboard notes: the Model dropdown lists Pi's authenticated models including `llama.cpp/...` — reopen the workspace to refresh after `/login`. Set Thinking to `off` (local models report no reasoning; Pi clamps anyway). If selecting a model errors, load it first via `/llama` in terminal `pi`.
+Dashboard notes: the Model dropdown lists Pi's authenticated models including `llama.cpp/...` — reopen the workspace to refresh after `/login`. If selecting a model errors, load it first via `/llama` in terminal `pi`.
+
+Reasoning display: some local models expose reasoning as a structured `thinking_delta` stream; others (e.g. QwQ, DeepSeek-R1) emit it inline as `<think>…</think>` inside their text. The dashboard handles both — structured deltas and inline `<think>` blocks are shown in a collapsible **Reasoning** card, kept out of the reply. A model that produces no reasoning shows no reasoning card (no empty blocks). Set Thinking to `off` for models that don't reason (Pi clamps anyway). If reasoning or tool calls don't appear as expected with a given model, run with `PI_WEBUI_DEBUG_EVENTS=1` (see Troubleshooting) to log the raw SDK event shapes.
+
+UI language: the interface auto-selects Italian or English from the browser/OS language on first launch (English otherwise), and remembers a manual choice (bottom of the sidebar/drawer) in `localStorage`.
 
 Known quirks (Pi 0.85.1, not this app): `pi auth check --provider llama.cpp` reports `provider_not_found` because that command path doesn't load extensions — ignore it and trust `/llama` + the dashboard dropdown instead. The server loads Pi's built-in provider extension explicitly (see Architecture); without that, `llama.cpp` models never appear even with correct login.
 
@@ -183,6 +187,7 @@ tail -f logs/pi-web-ui.log           # logs (gitignored; truncate when large)
 - `llama.cpp` models missing from the dropdown → complete `/login llama.cpp` with the exact router URL (terminal `pi`), then reopen the workspace in the dashboard. `pi auth check --provider llama.cpp` saying `provider_not_found` is a Pi CLI quirk — ignore it.
 - `llama.cpp` model errors on send → load it first via `/llama` in terminal `pi` (only loaded models run), then resend.
 - Router unreachable (`/llama` shows Retry/Close) → check `curl <url>/health`, `--models-dir` layout, router-mode start (no `--model`), and restart the router.
+- Reasoning or tool calls not showing with a given model → start with `PI_WEBUI_DEBUG_EVENTS=1 npm start` and send a prompt; the server logs each raw SDK event as `[pi-event] <type> {…keys}` (secret-redacted). Compare with the terminal `pi` TUI to see how that model delivers reasoning (`thinking_delta` vs inline `<think>`) and tool execution. Unset the flag when done. If the model calls no tools in read-only mode, switch Tools to **Full** (idle only).
 - `session is already open` → second resume attaches to the same live `chatId` (no second writer); use that chat.
 - Empty new sessions may not list until the first message (Pi persists on first append).
 - `SDK initialization failure` / model errors surface as actionable notices in the conversation, not silent failures.

@@ -61,7 +61,7 @@ test.describe("desktop flow", () => {
     expect(val).toContain("\n");
 
     // SSE reconnect recovery: reload page, reopen workspace, resume first session, expect no duplicates
-    const beforeTexts = await page.locator(".msg.assistant .bubble").allTextContents();
+    const beforeTexts = await page.locator(".msg.assistant .md").allTextContents();
     await page.reload();
     const menu2 = page.getByRole("button", { name: /open sessions menu/i });
     if (await menu2.isVisible().catch(() => false)) {
@@ -73,7 +73,7 @@ test.describe("desktop flow", () => {
     await page.locator(".sess-item").first().click();
     await expect(page.getByLabel(/message input/i)).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(/Echo:/).first()).toBeVisible({ timeout: 10000 });
-    const afterTexts = await page.locator(".msg.assistant .bubble").allTextContents();
+    const afterTexts = await page.locator(".msg.assistant .md").allTextContents();
     // No duplicates: same number of assistant messages after resume
     expect(afterTexts.length).toBe(beforeTexts.length);
   });

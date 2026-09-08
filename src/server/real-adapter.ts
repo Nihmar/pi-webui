@@ -3,6 +3,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import type { ChatHandle, PiAdapter, WorkspaceData } from "./adapter.js";
 import {
   truncatePreview,
+  redactSecrets,
   type ChatItem,
   type ModelInfo,
   type QueueState,
@@ -29,6 +30,57 @@ let itemCounter = 0;
 function newId(prefix: string): string {
   itemCounter += 1;
   return `${prefix}-${Date.now().toString(36)}-${itemCounter}-${randomUUID().slice(0, 6)}`;
+}
+
+// Opt-in raw SDK event logger to discover the exact event shapes a given Pi
+// provider (e.g. a local llama.cpp model) emits. Enable with PI_WEBUI_DEBUG_EVENTS=1.
+// Prints the event type plus a shallow, secret-redacted view of its keys so we can
+// confirm how thinking and tool calls actually arrive without leaking credentials.
+const DEBUG_EVENTS = process.env.PI_WEBUI_DEBUG_EVENTS === "1";
+function logSdkEvent(ev: Record<string, unknown>): void {
+  try {
+    const type = String(ev.type ?? "?");
+    const shape: Record<string, string> = {};
+    for (const [k, v] of Object.entries(ev)) {
+      if (k === "type") continue;
+      if (v === null || v === undefined) shape[k] = String(v);
+      else if (Array.isArray(v)) shape[k] = `array(${v.length})`;
+      else if (typeof v === "object") shape[k] = `{ ${Object.keys(v as object).slice(0, 8).join(", ")} }`;
+      else shape[k] = truncatePreview(String(redactSecrets(v)), 120);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[pi-event] ${type}`, JSON.stringify(shape));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Detect inline reasoning wrapped in <think>…</think> that some local models
+// (QwQ, DeepSeek-R1, …) stream inside their text output instead of as
+// structured thinking_delta events. Returns the length of the longest suffix of
+// `buf` that is a proper prefix of `tag`, so a tag split across deltas is held back.
+function partialTailLen(buf: string, tag: string): number {
+  const max = Math.min(buf.length, tag.length - 1);
+  for (let n = max; n > 0; n--) {
+    if (buf.slice(buf.length - n) === tag.slice(0, n)) return n;
+  }
+  return 0;
+}
+
+// Pull display text out of the many shapes a tool result/partial can take:
+// a plain string, an array of blocks, or an object with { text } / { content } / { output }.
+function extractContentText(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map((c) => extractContentText(c)).filter(Boolean).join("\n");
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.text === "string") return o.text;
+    if (o.content !== undefined) return extractContentText(o.content);
+    if (typeof o.output === "string") return o.output;
+    if (typeof o.message === "string") return o.message;
+  }
+  return "";
 }
 
 function chunkText(s: string, n: number): string[] {
@@ -143,6 +195,8 @@ class RealChat implements ChatHandle {
   private pendingExtension = new Map<string, { resolve: (v: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void }>();
   private streamingAssistantId?: string;
   private streamingThinkingId?: string;
+  private insideThink = false; // <think> splitter state for inline-reasoning models
+  private textTail = ""; // holdback buffer for a possibly-split <think>/</think> tag
   private toolItems = new Map<string, string>(); // toolCallId -> itemId
   private settledForRun: (() => void)[] = [];
 
@@ -242,6 +296,7 @@ class RealChat implements ChatHandle {
       const runId = this.runId;
       // stale-event rejection via generation/run: if disposed generation changed, ignore (disposed flag covers)
       void runId;
+      if (DEBUG_EVENTS) logSdkEvent(raw);
       try {
         this.handleSdkEvent(raw);
       } catch (e) {
@@ -254,88 +309,90 @@ class RealChat implements ChatHandle {
     const type = ev.type as string;
     switch (type) {
       case "message_start": {
-        // start new assistant + thinking placeholders
-        this.streamingThinkingId = newId("th");
-        this.streamingAssistantId = newId("a");
-        const th: ChatItem = { id: this.streamingThinkingId, kind: "thinking", text: "", timestamp: Date.now(), completed: false };
-        this.items.push(th);
-        this.emit({ type: "item_added", item: th });
-        const a: ChatItem = { id: this.streamingAssistantId, kind: "assistant", text: "", timestamp: Date.now(), completed: false };
-        this.items.push(a);
-        this.emit({ type: "item_added", item: a });
+        // Lazy items: create the thinking/assistant items only when their first delta
+        // arrives, so a model that emits no reasoning produces no empty "Thinking"
+        // block, and ordering follows whichever content actually streams first.
+        this.streamingThinkingId = undefined;
+        this.streamingAssistantId = undefined;
+        this.insideThink = false;
+        this.textTail = "";
         break;
       }
       case "message_update": {
-        const inner = ev.assistantMessageEvent as { type?: string; delta?: string; toolName?: string; id?: string } | undefined;
+        const inner = ev.assistantMessageEvent as { type?: string; delta?: string; text?: string; thinking?: string } | undefined;
         if (!inner) break;
-        if (inner.type === "text_delta" && typeof inner.delta === "string") {
-          const id = this.streamingAssistantId;
-          if (!id) break;
-          const it = this.items.find((i) => i.id === id);
-          if (it && it.kind === "assistant") {
-            it.text += inner.delta;
-            this.emit({ type: "assistant_delta", messageId: id, delta: inner.delta.slice(0, 8000) });
-            // batch: also emit item_updated throttled? emit directly for simplicity
-            this.emit({ type: "item_updated", item: { ...it } });
-          }
-        } else if (inner.type === "thinking_delta" && typeof inner.delta === "string") {
-          const id = this.streamingThinkingId;
-          if (!id) break;
-          const it = this.items.find((i) => i.id === id);
-          if (it && it.kind === "thinking") {
-            it.text += inner.delta;
-            this.emit({ type: "thinking_delta", thinkingId: id, delta: inner.delta.slice(0, 8000) });
-            this.emit({ type: "item_updated", item: { ...it } });
-          }
+        const delta = typeof inner.delta === "string" ? inner.delta : typeof inner.text === "string" ? inner.text : undefined;
+        if (inner.type === "text_delta" && typeof delta === "string") {
+          // Route through the <think> splitter: structured-reasoning models emit no
+          // tags (everything goes to the assistant item), while inline-reasoning local
+          // models (QwQ, DeepSeek-R1, …) get their <think>…</think> content peeled off
+          // into a dedicated thinking item instead of polluting the reply.
+          this.feedAssistantText(delta);
+        } else if (inner.type === "thinking_delta") {
+          const d = typeof delta === "string" ? delta : typeof inner.thinking === "string" ? inner.thinking : "";
+          if (d) this.appendThinking(d);
         }
         break;
       }
       case "message_end": {
-        // Do NOT mark run complete here; just complete current message placeholders.
-        // Treat message_end.message as authoritative if present.
-        const msg = ev.message as { content?: { type?: string; text?: string; thinking?: string }[] } | undefined;
-        if (msg && Array.isArray(msg.content) && this.streamingAssistantId) {
-          const it = this.items.find((i) => i.id === this.streamingAssistantId);
-          if (it && it.kind === "assistant") {
-            const texts = msg.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
-            if (texts && it.text !== texts) {
-              it.text = truncatePreview(texts, 20000);
-              this.emit({ type: "item_updated", item: { ...it } });
-            }
+        // Do NOT mark the run complete here (retries/compaction/queue may follow).
+        // Flush any text the <think> splitter was holding back.
+        this.flushTextTail();
+        const msg = ev.message as { content?: unknown } | undefined;
+        const content = msg?.content;
+        // Fallback: if streaming produced no assistant/thinking item (some providers
+        // deliver only the finalized message), materialise them from the completed
+        // message — running text through the same splitter for inline reasoning.
+        if (Array.isArray(content)) {
+          const parts = content as { type?: string; text?: string; thinking?: string }[];
+          const fullThinking = parts.filter((c) => c.type === "thinking").map((c) => c.thinking ?? "").join("");
+          const fullText = parts.filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+          if (!this.streamingThinkingId && fullThinking.trim()) this.appendThinking(fullThinking);
+          if (!this.streamingAssistantId && fullText.trim()) {
+            this.feedAssistantText(fullText);
+            this.flushTextTail();
           }
         }
         break;
       }
       case "tool_execution_start": {
-        const toolCallId = String(ev.toolCallId ?? newId("tool"));
-        const toolName = String(ev.toolName ?? "tool");
+        // Field names vary by provider/version; read the documented names plus aliases.
+        const tc = (ev.toolCall ?? {}) as Record<string, unknown>;
+        const toolCallId = String(ev.toolCallId ?? ev.id ?? tc.id ?? newId("tool"));
+        const toolName = String(ev.toolName ?? ev.name ?? tc.name ?? "tool");
+        const rawArgs = ev.args ?? ev.input ?? ev.arguments ?? tc.input ?? tc.arguments;
         let argsSummary = toolName;
         try {
-          const args = ev.args as Record<string, unknown> | undefined;
-          if (args) {
-            const keys = Object.keys(args).slice(0, 3).map((k) => `${k}: ${truncatePreview(String(args[k]).slice(0, 200), 200)}`);
+          const args = redactSecrets(rawArgs);
+          if (args && typeof args === "object" && !Array.isArray(args)) {
+            const keys = Object.entries(args as Record<string, unknown>)
+              .slice(0, 3)
+              .map(([k, v]) => `${k}: ${truncatePreview(typeof v === "string" ? v : JSON.stringify(v), 120)}`);
             argsSummary = `${toolName} { ${keys.join(", ")} }`.slice(0, 500);
+          } else if (typeof args === "string" && args) {
+            argsSummary = `${toolName} ${truncatePreview(args, 200)}`.slice(0, 500);
           }
         } catch {
           /* ignore */
         }
         const itemId = newId("tool");
         this.toolItems.set(toolCallId, itemId);
-        const item: ChatItem = { id: itemId, kind: "tool", toolName, argsSummary, status: "running", preview: "running…", timestamp: Date.now() };
+        const timestamp = Date.now();
+        const item: ChatItem = { id: itemId, kind: "tool", toolName, argsSummary, status: "running", preview: "running…", timestamp };
         this.items.push(item);
-        this.emit({ type: "tool_start", item: { id: itemId, kind: "tool", toolName, argsSummary, status: "running", preview: "running…", timestamp: item.timestamp } });
+        this.emit({ type: "tool_start", item: { id: itemId, kind: "tool", toolName, argsSummary, status: "running", preview: "running…", timestamp } });
         break;
       }
       case "tool_execution_update": {
-        const toolCallId = String(ev.toolCallId ?? "");
+        const tc = (ev.toolCall ?? {}) as Record<string, unknown>;
+        const toolCallId = String(ev.toolCallId ?? ev.id ?? tc.id ?? "");
         const itemId = this.toolItems.get(toolCallId);
         if (!itemId) break;
         const it = this.items.find((i) => i.id === itemId);
-        // partialResult.content -> preview (bounded, redacted)
         let preview = "running…";
         try {
-          const pr = ev.partialResult as { content?: { text?: string }[] } | undefined;
-          if (pr?.content) preview = truncatePreview(pr.content.map((c) => c.text ?? "").join("\n").slice(0, 6000));
+          const text = extractContentText(ev.partialResult ?? ev.delta ?? ev.content ?? ev.output ?? ev.result);
+          if (text) preview = truncatePreview(String(redactSecrets(text)).slice(0, 6000));
         } catch {
           /* ignore */
         }
@@ -347,13 +404,14 @@ class RealChat implements ChatHandle {
         break;
       }
       case "tool_execution_end": {
-        const toolCallId = String(ev.toolCallId ?? "");
+        const tc = (ev.toolCall ?? {}) as Record<string, unknown>;
+        const toolCallId = String(ev.toolCallId ?? ev.id ?? tc.id ?? "");
         const itemId = this.toolItems.get(toolCallId) ?? "";
-        const isError = ev.isError === true;
+        const isError = ev.isError === true || ev.error != null;
         let preview = "";
         try {
-          const r = ev.result as { content?: { text?: string }[] } | undefined;
-          if (r?.content) preview = truncatePreview(r.content.map((c) => c.text ?? "").join("\n").slice(0, 6000));
+          const text = extractContentText(ev.result ?? ev.content ?? ev.output ?? ev.error);
+          if (text) preview = truncatePreview(String(redactSecrets(text)).slice(0, 6000));
         } catch {
           /* ignore */
         }
@@ -437,7 +495,88 @@ class RealChat implements ChatHandle {
     }
   }
 
+  // Append streamed assistant text, lazily creating the assistant item on first delta.
+  private appendAssistant(delta: string): void {
+    if (!delta) return;
+    let it = this.streamingAssistantId ? this.items.find((i) => i.id === this.streamingAssistantId) : undefined;
+    if (!it || it.kind !== "assistant") {
+      const created: ChatItem = { id: newId("a"), kind: "assistant", text: "", timestamp: Date.now(), completed: false };
+      this.streamingAssistantId = created.id;
+      this.items.push(created);
+      this.emit({ type: "item_added", item: { ...created } });
+      it = created;
+    }
+    if (it.kind !== "assistant") return;
+    it.text += delta;
+    this.emit({ type: "assistant_delta", messageId: it.id, delta: delta.slice(0, 8000) });
+    this.emit({ type: "item_updated", item: { ...it } });
+  }
+
+  // Append streamed reasoning, lazily creating the thinking item on first delta.
+  private appendThinking(delta: string): void {
+    if (!delta) return;
+    let it = this.streamingThinkingId ? this.items.find((i) => i.id === this.streamingThinkingId) : undefined;
+    if (!it || it.kind !== "thinking") {
+      const created: ChatItem = { id: newId("th"), kind: "thinking", text: "", timestamp: Date.now(), completed: false };
+      this.streamingThinkingId = created.id;
+      this.items.push(created);
+      this.emit({ type: "item_added", item: { ...created } });
+      it = created;
+    }
+    if (it.kind !== "thinking") return;
+    it.text += delta;
+    this.emit({ type: "thinking_delta", thinkingId: it.id, delta: delta.slice(0, 8000) });
+    this.emit({ type: "item_updated", item: { ...it } });
+  }
+
+  // Split assistant text into reply vs inline <think>…</think> reasoning, buffering a
+  // tail that could be a tag split across deltas.
+  private feedAssistantText(chunk: string): void {
+    const OPEN = "<think>";
+    const CLOSE = "</think>";
+    let buf = this.textTail + chunk;
+    this.textTail = "";
+    while (buf.length) {
+      if (!this.insideThink) {
+        const idx = buf.indexOf(OPEN);
+        if (idx === -1) {
+          const hold = partialTailLen(buf, OPEN);
+          const emit = buf.slice(0, buf.length - hold);
+          if (emit) this.appendAssistant(emit);
+          this.textTail = buf.slice(buf.length - hold);
+          return;
+        }
+        if (idx > 0) this.appendAssistant(buf.slice(0, idx));
+        buf = buf.slice(idx + OPEN.length);
+        this.insideThink = true;
+      } else {
+        const idx = buf.indexOf(CLOSE);
+        if (idx === -1) {
+          const hold = partialTailLen(buf, CLOSE);
+          const emit = buf.slice(0, buf.length - hold);
+          if (emit) this.appendThinking(emit);
+          this.textTail = buf.slice(buf.length - hold);
+          return;
+        }
+        if (idx > 0) this.appendThinking(buf.slice(0, idx));
+        buf = buf.slice(idx + CLOSE.length);
+        this.insideThink = false;
+      }
+    }
+  }
+
+  private flushTextTail(): void {
+    if (!this.textTail) return;
+    const rest = this.textTail;
+    this.textTail = "";
+    if (this.insideThink) this.appendThinking(rest);
+    else this.appendAssistant(rest);
+  }
+
   private onSettled(): void {
+    // Flush any text the <think> splitter was holding back before completing.
+    this.flushTextTail();
+    this.insideThink = false;
     // Complete any streaming placeholders
     for (const it of this.items) {
       if ((it.kind === "assistant" || it.kind === "thinking") && !it.completed) {
@@ -1036,9 +1175,13 @@ export class RealAdapter implements PiAdapter {
           if (e.type === "message" && e.message) {
             const role = (e.message as { role?: string }).role;
             const content = (e.message as { content?: unknown }).content;
-            const text = RealAdapter.contentToText(content);
-            if (role === "user") items.push({ id: `e-${e.id}`, kind: "user", text: truncatePreview(text, 20000), timestamp: Date.parse(e.timestamp ?? "") || Date.now() });
-            else if (role === "assistant") items.push({ id: `e-${e.id}`, kind: "assistant", text: truncatePreview(text, 20000), timestamp: Date.parse(e.timestamp ?? "") || Date.now(), completed: true });
+            const ts = Date.parse(e.timestamp ?? "") || Date.now();
+            if (role === "user") {
+              items.push({ id: `e-${e.id}`, kind: "user", text: truncatePreview(RealAdapter.contentToText(content), 20000), timestamp: ts });
+            } else if (role === "assistant") {
+              // Restore reasoning + tool calls too (including inline <think>), not just text.
+              items.push(...RealAdapter.assistantContentToItems(content, ts, `e-${e.id}`));
+            }
           } else if (e.type === "compaction") {
             items.push({ id: `e-${e.id}`, kind: "notice", text: "Context compacted (history summarized).", level: "info", timestamp: Date.parse(e.timestamp ?? "") || Date.now() });
           }
@@ -1068,6 +1211,68 @@ export class RealAdapter implements PiAdapter {
     return "";
   }
 
+  // Peel inline <think>…</think> reasoning out of a stored assistant text so a
+  // resumed local-model session shows the reasoning in its own block, not the reply.
+  static splitInlineThink(text: string): { thinking: string; reply: string } {
+    if (!text.includes("<think>")) return { thinking: "", reply: text };
+    let thinking = "";
+    let reply = "";
+    let last = 0;
+    const re = /<think>([\s\S]*?)<\/think>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      reply += text.slice(last, m.index);
+      thinking += m[1];
+      last = re.lastIndex;
+    }
+    reply += text.slice(last);
+    // Unterminated <think> (e.g. an interrupted run): treat the remainder as reasoning.
+    const open = reply.indexOf("<think>");
+    if (open !== -1) {
+      thinking += reply.slice(open + "<think>".length);
+      reply = reply.slice(0, open);
+    }
+    return { thinking: thinking.trim(), reply: reply.trim() };
+  }
+
+  // Convert one stored assistant message's content into ordered thinking/text/tool
+  // items with deterministic ids (so resnapshots reconcile instead of duplicating).
+  static assistantContentToItems(content: unknown, timestamp: number, idPrefix: string): ChatItem[] {
+    const out: ChatItem[] = [];
+    let text = "";
+    let thinking = "";
+    const tools: { name: string; args: unknown }[] = [];
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      for (const c of content as { type?: string; text?: string; thinking?: string; name?: string; arguments?: unknown }[]) {
+        if (c.type === "text" && c.text) text += c.text;
+        else if (c.type === "thinking" && c.thinking) thinking += c.thinking;
+        else if (c.type === "toolCall") tools.push({ name: String(c.name ?? "tool"), args: c.arguments });
+      }
+    }
+    if (!thinking && text.includes("<think>")) {
+      const s = RealAdapter.splitInlineThink(text);
+      thinking = s.thinking;
+      text = s.reply;
+    }
+    let n = 0;
+    if (thinking.trim()) out.push({ id: `${idPrefix}-th${n++}`, kind: "thinking", text: truncatePreview(thinking, 20000), timestamp, completed: true });
+    if (text.trim()) out.push({ id: `${idPrefix}-a${n++}`, kind: "assistant", text: truncatePreview(text, 20000), timestamp, completed: true });
+    for (const t of tools) {
+      out.push({
+        id: `${idPrefix}-tool${n++}`,
+        kind: "tool",
+        toolName: t.name,
+        argsSummary: truncatePreview(`${t.name} ${JSON.stringify(redactSecrets(t.args) ?? {}).slice(0, 300)}`, 500),
+        status: "success",
+        preview: "[tool call]",
+        timestamp
+      });
+    }
+    return out;
+  }
+
   static messagesToItems(session: PiSession): ChatItem[] {
     const out: ChatItem[] = [];
     const msgs = session.messages ?? [];
@@ -1077,23 +1282,7 @@ export class RealAdapter implements PiAdapter {
         const text = typeof m.content === "string" ? m.content : RealAdapter.contentToText(m.content);
         out.push({ id: newId("u"), kind: "user", text: truncatePreview(text, 20000), timestamp: m.timestamp ?? Date.now() });
       } else if (role === "assistant") {
-        const content = m.content as { type?: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string }[] | string | undefined;
-        let text = "";
-        let thinking = "";
-        const tools: { id: string; name: string; args: unknown }[] = [];
-        if (typeof content === "string") text = content;
-        else if (Array.isArray(content)) {
-          for (const c of content) {
-            if (c.type === "text" && c.text) text += c.text;
-            else if (c.type === "thinking" && c.thinking) thinking += c.thinking;
-            else if (c.type === "toolCall") tools.push({ id: String(c.id ?? newId("tool")), name: String(c.name ?? "tool"), args: c.arguments });
-          }
-        }
-        if (thinking.trim()) out.push({ id: newId("th"), kind: "thinking", text: truncatePreview(thinking, 20000), timestamp: m.timestamp ?? Date.now(), completed: true });
-        if (text.trim()) out.push({ id: newId("a"), kind: "assistant", text: truncatePreview(text, 20000), timestamp: m.timestamp ?? Date.now(), completed: true });
-        for (const t of tools) {
-          out.push({ id: newId("tool"), kind: "tool", toolName: t.name, argsSummary: truncatePreview(`${t.name} ${JSON.stringify(t.args ?? {}).slice(0, 300)}`, 500), status: "success", preview: "[tool call]", timestamp: m.timestamp ?? Date.now() });
-        }
+        out.push(...RealAdapter.assistantContentToItems(m.content, m.timestamp ?? Date.now(), newId("m")));
       } else if (role === "toolResult") {
         const tr = m as unknown as { toolCallId?: string; toolName?: string; content?: { text?: string }[] | string; isError?: boolean };
         let preview = "";

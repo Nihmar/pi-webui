@@ -20,10 +20,33 @@ import {
   type ConnState
 } from "./api.ts";
 import { SafeMarkdown } from "./markdown.tsx";
+import { useI18n, LanguageSwitch } from "./i18n.tsx";
 import type { ChatItem, ModelInfo, ServerEvent, SessionSummary, Snapshot, ThinkingLevel, ToolMode } from "../../src/shared/protocol.ts";
 import "./styles.css";
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// Official Pi mark; inherits color via currentColor so it works in light & dark.
+function PiLogo({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 800 800" fill="currentColor" aria-hidden="true" focusable="false">
+      <path fillRule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z" />
+      <path d="M517.36 400 H634.72 V634.72 H517.36 Z" />
+    </svg>
+  );
+}
+
+function Icon({ path, size = 15 }: { path: React.ReactNode; size?: number }): React.ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {path}
+    </svg>
+  );
+}
+const ICON_REASON = (<><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z" /><line x1="9" y1="22" x2="15" y2="22" /></>);
+const ICON_TOOL = (<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.1-.6-.6-2.1z" />);
+const ICON_CHEV = (<polyline points="9 18 15 12 9 6" />);
+const ICON_SEND = (<><line x1="12" y1="19" x2="12" y2="5" /><polyline points="6 11 12 5 18 11" /></>);
 
 function useIsMobile(): boolean {
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 820);
@@ -150,6 +173,7 @@ export default function App(): React.ReactElement {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const isMobile = useIsMobile();
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -292,11 +316,11 @@ export default function App(): React.ReactElement {
 
   const doSend = async (kind: "normal" | "steer" | "followUp", text: string): Promise<void> => {
     if (!chatId) return;
-    const t = text.trim();
-    if (!t) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
     setActionError(null);
     try {
-      await sendMessage(chatId, kind, t);
+      await sendMessage(chatId, kind, trimmed);
       if (kind === "normal") {
         setComposer("");
         saveDraft(chatId, "");
@@ -375,35 +399,37 @@ export default function App(): React.ReactElement {
   return (
     <div className="app">
       <a className="skip" href="#conversation">
-        Skip to conversation
+        {t("skip")}
       </a>
       <header className="topbar">
         {isMobile && (
-          <button ref={menuBtnRef} className="menu-btn" aria-label="Open sessions menu" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}>
-            ☰ Menu
+          <button ref={menuBtnRef} className="menu-btn" aria-label={t("ariaOpenMenu")} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}>
+            ☰ {t("menu")}
           </button>
         )}
-        <div className="brand">Pi Web UI</div>
+        <div className="brand"><PiLogo className="pi-mark" /> Pi Web UI</div>
         <div className="conn" role="status" aria-live="polite" data-conn={conn}>
-          {chatId ? conn : "idle"}
+          {chatId
+            ? t(conn === "connected" ? "connConnected" : conn === "reconnecting" ? "connReconnecting" : "connDisconnected")
+            : t("connIdle")}
         </div>
       </header>
 
       <div className="layout">
         {/* Sidebar / drawer */}
-        <aside className={`sidebar ${isMobile ? (drawerOpen ? "open" : "closed") : ""}`} aria-label="Sessions" aria-hidden={isMobile && !drawerOpen}>
+        <aside className={`sidebar ${isMobile ? (drawerOpen ? "open" : "closed") : ""}`} aria-label={t("ariaSessions")} aria-hidden={isMobile && !drawerOpen}>
           <div className="side-head">
             <button className="btn primary" onClick={doNewChat} disabled={!workspaceId}>
-              New chat
+              {t("newChat")}
             </button>
             {isMobile && (
-              <button className="btn" aria-label="Close sessions menu" onClick={() => setDrawerOpen(false)}>
+              <button className="btn" aria-label={t("ariaCloseMenu")} onClick={() => setDrawerOpen(false)}>
                 ✕
               </button>
             )}
           </div>
           <div className="side-section">
-            <label htmlFor="ws-path">Workspace</label>
+            <label htmlFor="ws-path">{t("workspace")}</label>
             <div className="ws-row">
               <input
                 id="ws-path"
@@ -413,14 +439,14 @@ export default function App(): React.ReactElement {
                 spellCheck={false}
               />
               <button className="btn" onClick={() => doOpenWorkspace()}>
-                Open
+                {t("open")}
               </button>
             </div>
-            {cwd && <div className="cwd" title={cwd}>Current: {cwd}</div>}
+            {cwd && <div className="cwd" title={cwd}>{t("currentPrefix")}{cwd}</div>}
             {workspaceError && <div className="error" role="alert">{workspaceError}</div>}
             {diagnostics.length > 0 && (
               <details className="diag">
-                <summary>Diagnostics</summary>
+                <summary>{t("diagnostics")}</summary>
                 <ul>
                   {diagnostics.map((d, i) => (
                     <li key={i}>{d}</li>
@@ -431,24 +457,25 @@ export default function App(): React.ReactElement {
             {trustNotice && <div className="trust" role="note">{trustNotice}</div>}
           </div>
           <div className="side-section">
-            <label htmlFor="sess-search">Recent sessions</label>
-            <input id="sess-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions…" />
+            <label htmlFor="sess-search">{t("recentSessions")}</label>
+            <input id="sess-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("searchSessions")} />
             <ul className="sess-list">
               {filteredSessions.map((s) => (
                 <li key={s.sessionId}>
                   <button className="sess-item" onClick={() => doResume(s.sessionId)}>
                     <span className="sess-name">{s.name || s.firstMessage?.slice(0, 60) || s.sessionId.slice(0, 12)}</span>
-                    {s.messageCount !== undefined && <span className="sess-meta">{s.messageCount} msgs</span>}
+                    {s.messageCount !== undefined && <span className="sess-meta">{s.messageCount} {t("msgsSuffix")}</span>}
                   </button>
                 </li>
               ))}
-              {workspaceId && filteredSessions.length === 0 && <li className="empty">No sessions yet.</li>}
-              {!workspaceId && <li className="empty">Open a workspace to list sessions.</li>}
+              {workspaceId && filteredSessions.length === 0 && <li className="empty">{t("noSessions")}</li>}
+              {!workspaceId && <li className="empty">{t("openToList")}</li>}
             </ul>
           </div>
           <div className="side-foot">
+            <LanguageSwitch />
             <div className="risk">
-              Pi has no built-in sandbox and runs with host user permissions. Tailscale controls network access only.
+              {t("risk")}
             </div>
           </div>
         </aside>
@@ -456,28 +483,30 @@ export default function App(): React.ReactElement {
 
         {/* Main */}
         <main className="main">
-          {!boot && !bootError && <div className="state">Loading…</div>}
-          {bootError && <div className="error" role="alert">Failed to load: {bootError}</div>}
+          {!boot && !bootError && <div className="state">{t("loading")}</div>}
+          {bootError && <div className="error" role="alert">{t("failedToLoad")}{bootError}</div>}
           {!workspaceId && boot && (
             <div className="state">
-              <h1>Open a project</h1>
-              <p>Choose the project directory Pi should use as its canonical cwd.</p>
-              {models.length === 0 && <p className="warn">No authenticated model yet — run <code>pi</code> and <code>/login</code> locally.</p>}
+              <PiLogo className="pi-mark" />
+              <h1>{t("openProjectTitle")}</h1>
+              <p>{t("openProjectBody")}</p>
+              {models.length === 0 && <p className="warn">{t("noModelA")} <code>pi</code> {t("noModelB")} <code>/login</code> {t("noModelC")}</p>}
             </div>
           )}
           {workspaceId && !chatId && (
             <div className="state">
-              <h1>No chat yet</h1>
-              <p>Create a new chat or resume a native Pi session. Sessions survive server restart.</p>
-              <button className="btn primary" onClick={doNewChat}>New chat</button>
-              {models.length === 0 && <p className="warn">No authenticated model — run <code>pi</code> and <code>/login</code> locally. The UI will not ask for credentials.</p>}
+              <PiLogo className="pi-mark" />
+              <h1>{t("noChatTitle")}</h1>
+              <p>{t("noChatBody")}</p>
+              <button className="btn primary" onClick={doNewChat}>{t("newChat")}</button>
+              {models.length === 0 && <p className="warn">{t("noModelA")} <code>pi</code> {t("noModelB")} <code>/login</code> {t("noModelC")} {t("noCreds")}</p>}
             </div>
           )}
           {workspaceId && chatId && snapshot && (
             <>
-              <div className="controls" role="toolbar" aria-label="Chat controls">
+              <div className="controls" role="toolbar" aria-label={t("ariaChatControls")}>
                 <label>
-                  Model
+                  {t("model")}
                   <select
                     value={snapshot.model ? `${snapshot.model.provider}/${snapshot.model.id}` : ""}
                     disabled={busy}
@@ -487,7 +516,7 @@ export default function App(): React.ReactElement {
                       if (provider && id) void doConfig({ model: { provider, id } });
                     }}
                   >
-                    <option value="">(default)</option>
+                    <option value="">{t("modelDefault")}</option>
                     {models.map((m) => (
                       <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
                         {m.provider}/{m.id}
@@ -496,48 +525,48 @@ export default function App(): React.ReactElement {
                   </select>
                 </label>
                 <label>
-                  Thinking
+                  {t("thinking")}
                   <select value={snapshot.thinking ?? "medium"} disabled={busy} onChange={(e) => void doConfig({ thinking: e.target.value as ThinkingLevel })}>
-                    {THINKING_LEVELS.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                    {THINKING_LEVELS.map((lvl) => (
+                      <option key={lvl} value={lvl}>{lvl}</option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Tools
-                  <select value={snapshot.toolMode} disabled={busy} onChange={(e) => void doConfig({ toolMode: e.target.value as ToolMode })} title="Read-only is a model-tool allowlist, not an OS sandbox. It does not make loaded extensions harmless.">
-                    <option value="readonly">Read-only</option>
-                    <option value="full">Full</option>
+                  {t("tools")}
+                  <select value={snapshot.toolMode} disabled={busy} onChange={(e) => void doConfig({ toolMode: e.target.value as ToolMode })} title={t("toolTitle")}>
+                    <option value="readonly">{t("readonly")}</option>
+                    <option value="full">{t("full")}</option>
                   </select>
                 </label>
-                <span className="tool-hint">Read-only is an allowlist, not a sandbox.</span>
-                <button className="btn" onClick={() => { setRenameValue(snapshot.sessionName ?? ""); setRenameOpen(true); }} disabled={busy}>Rename</button>
-                <button className="btn" onClick={() => void compactChat(chatId).then(() => fetchSnapshot(chatId).then(({ snapshot: s }) => setSnapshot(s)))} disabled={busy}>Compact</button>
-                {queueCount > 0 && <span className="queue" aria-live="polite">Queued: {queueCount}</span>}
+                <span className="tool-hint">{t("toolHint")}</span>
+                <button className="btn" onClick={() => { setRenameValue(snapshot.sessionName ?? ""); setRenameOpen(true); }} disabled={busy}>{t("rename")}</button>
+                <button className="btn" onClick={() => void compactChat(chatId).then(() => fetchSnapshot(chatId).then(({ snapshot: s }) => setSnapshot(s)))} disabled={busy}>{t("compact")}</button>
+                {queueCount > 0 && <span className="queue" aria-live="polite">{t("queued")} {queueCount}</span>}
               </div>
 
-              {actionError && <div className="error" role="alert">Action failed: {actionError}</div>}
-              {conn !== "connected" && <div className="warn" role="status">SSE {conn} — retrying…</div>}
+              {actionError && <div className="error" role="alert">{t("actionFailed")}{actionError}</div>}
+              {conn !== "connected" && <div className="warn" role="status">SSE {conn} {t("sseRetry")}</div>}
 
-              <div id="conversation" ref={scrollRef} onScroll={onScroll} className="conversation" tabIndex={0} aria-label="Conversation">
+              <div id="conversation" ref={scrollRef} onScroll={onScroll} className="conversation" tabIndex={0} aria-label={t("ariaConversation")}>
                 {snapshot.items.map((item) => (
                   <ItemView key={item.id} item={item} />
                 ))}
-                {snapshot.items.length === 0 && <div className="empty">No messages yet. Send the first prompt below.</div>}
+                {snapshot.items.length === 0 && <div className="empty">{t("emptyConvo")}</div>}
               </div>
               {showJump && (
                 <button className="jump" onClick={() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }}>
-                  Jump to latest
+                  {t("jump")}
                 </button>
               )}
 
               <div className="composer-wrap">
                 {busy && (
                   <div className="queue-bar" aria-live="polite">
-                    <span>{stopping ? "Stopping…" : "Running…"} {queueCount > 0 && `· queued ${queueCount}`}</span>
+                    <span className="live">{stopping ? t("stopping") : t("running")} {queueCount > 0 && `· ${queueCount} ${t("queuedInline")}`}</span>
                     <span className="seg">
-                      <button className={`btn small ${sendMode === "steer" ? "active" : ""}`} onClick={() => setSendMode("steer")}>Steer</button>
-                      <button className={`btn small ${sendMode === "followUp" ? "active" : ""}`} onClick={() => setSendMode("followUp")}>Follow-up</button>
+                      <button className={`btn small ${sendMode === "steer" ? "active" : ""}`} onClick={() => setSendMode("steer")}>{t("steer")}</button>
+                      <button className={`btn small ${sendMode === "followUp" ? "active" : ""}`} onClick={() => setSendMode("followUp")}>{t("followUp")}</button>
                     </span>
                   </div>
                 )}
@@ -562,9 +591,9 @@ export default function App(): React.ReactElement {
                     ref={textareaRef}
                     value={composer}
                     onChange={(e) => setComposer(e.target.value)}
-                    placeholder={busy ? "Queue a follow-up or steer…" : "Send a message… (Enter to send, Shift+Enter newline)"}
+                    placeholder={busy ? t("composerBusy") : t("composerIdle")}
                     rows={2}
-                    aria-label="Message input"
+                    aria-label={t("ariaMessageInput")}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey && !isMobile) {
                         const isDesktop = window.matchMedia("(pointer: fine)").matches;
@@ -577,16 +606,22 @@ export default function App(): React.ReactElement {
                     }}
                   />
                   {!busy ? (
-                    <button className="btn primary send" onClick={() => void doSend("normal", composer)} disabled={!composer.trim()}>
-                      Send
+                    <button className="send" aria-label={t("send")} title={t("send")} onClick={() => void doSend("normal", composer)} disabled={!composer.trim()}>
+                      <Icon path={ICON_SEND} size={18} />
                     </button>
                   ) : (
                     <>
-                      <button className="btn primary send" onClick={() => void doSend(sendMode === "normal" ? "followUp" : sendMode, composer)} disabled={!composer.trim()}>
-                        {sendMode === "normal" ? "Queue" : sendMode === "steer" ? "Steer" : "Follow-up"}
+                      <button
+                        className="send"
+                        aria-label={sendMode === "normal" ? t("queueAction") : sendMode === "steer" ? t("steer") : t("followUp")}
+                        title={sendMode === "normal" ? t("queueAction") : sendMode === "steer" ? t("steer") : t("followUp")}
+                        onClick={() => void doSend(sendMode === "normal" ? "followUp" : sendMode, composer)}
+                        disabled={!composer.trim()}
+                      >
+                        <Icon path={ICON_SEND} size={18} />
                       </button>
-                      <button className="btn danger send" onClick={doStop}>
-                        Stop
+                      <button className="send danger" aria-label={t("stop")} title={t("stop")} onClick={doStop}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
                       </button>
                     </>
                   )}
@@ -598,7 +633,7 @@ export default function App(): React.ReactElement {
       </div>
 
       {renameOpen && (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Rename chat">
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("renameTitle")}>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -606,13 +641,14 @@ export default function App(): React.ReactElement {
               setRenameOpen(false);
             }}
           >
+            <h2>{t("renameTitle")}</h2>
             <label>
-              Name
+              {t("name")}
               <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} maxLength={300} autoFocus />
             </label>
             <div className="modal-actions">
-              <button type="submit" className="btn primary">Save</button>
-              <button type="button" className="btn" onClick={() => setRenameOpen(false)}>Cancel</button>
+              <button type="submit" className="btn primary">{t("save")}</button>
+              <button type="button" className="btn" onClick={() => setRenameOpen(false)}>{t("cancel")}</button>
             </div>
           </form>
         </div>
@@ -633,11 +669,9 @@ export default function App(): React.ReactElement {
 }
 
 function ItemView({ item }: { item: ChatItem }): React.ReactElement {
-  const [open, setOpen] = useState(item.kind === "user" || item.kind === "assistant");
   if (item.kind === "user") {
     return (
       <div className="msg user">
-        <div className="role">You</div>
         <div className="bubble"><SafeMarkdown text={item.text} /></div>
       </div>
     );
@@ -645,38 +679,64 @@ function ItemView({ item }: { item: ChatItem }): React.ReactElement {
   if (item.kind === "assistant") {
     return (
       <div className="msg assistant">
-        <div className="role">Assistant {item.completed ? "" : "· streaming…"}</div>
-        <div className="bubble"><SafeMarkdown text={item.text || "…"} /></div>
+        {item.text ? <SafeMarkdown text={item.text} /> : <div className="md"><span className="streaming-caret">▍</span></div>}
       </div>
     );
   }
-  if (item.kind === "thinking") {
-    return (
-      <details className="thinking" open={false}>
-        <summary onClick={(e) => { e.preventDefault(); setOpen(!open); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(!open); } }} tabIndex={0} role="button" aria-expanded={open}>
-          Thinking {item.completed ? "" : "· streaming…"}
-        </summary>
-        {open && <div className="thinking-body">{item.text}</div>}
-      </details>
-    );
-  }
-  if (item.kind === "tool") {
-    return (
-      <details className="tool" open={false}>
-        <summary>
-          <span className={`dot ${item.status}`} aria-hidden /> {item.toolName} — {item.argsSummary.slice(0, 120)} ({item.status})
-        </summary>
-        <div className="tool-body">{item.preview}</div>
-      </details>
-    );
-  }
+  if (item.kind === "thinking") return <ReasoningItem item={item} />;
+  if (item.kind === "tool") return <ToolItem item={item} />;
   return <div className={`notice ${item.level}`} role={item.level === "error" ? "alert" : "note"}>{item.text}</div>;
 }
 
+function ReasoningItem({ item }: { item: Extract<ChatItem, { kind: "thinking" }> }): React.ReactElement {
+  const { t } = useI18n();
+  // Auto-open while streaming so the reasoning is visible as it arrives; the native
+  // <details> toggle (tracked in state) then lets the reader collapse/expand freely.
+  const [open, setOpen] = useState(!item.completed);
+  return (
+    <details className="rz reason" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>
+        <Icon path={ICON_REASON} />
+        <span>{t("reasoning")}</span>
+        {!item.completed && <span className="pulse" aria-hidden />}
+        {!item.completed && <span className="tag">{t("streaming")}</span>}
+        <span className="chev"><Icon path={ICON_CHEV} size={16} /></span>
+      </summary>
+      <div className="reason-body">{item.text || "…"}</div>
+    </details>
+  );
+}
+
+function ToolItem({ item }: { item: Extract<ChatItem, { kind: "tool" }> }): React.ReactElement {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const stCls = item.status === "success" ? "ok" : item.status === "error" ? "err" : "run";
+  const stLabel = item.status === "success" ? t("stSuccess") : item.status === "error" ? t("stError") : t("stRunning");
+  const args = item.argsSummary.startsWith(item.toolName)
+    ? item.argsSummary.slice(item.toolName.length).trim()
+    : item.argsSummary;
+  return (
+    <details className="rz tool" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>
+        <Icon path={ICON_TOOL} />
+        <span className="tool-name">{item.toolName}</span>
+        <span className="tool-args">{args}</span>
+        <span className={`st ${stCls}`}>
+          {item.status === "running" ? <span className="spin" aria-hidden /> : <span className="d" aria-hidden />}
+          {stLabel}
+        </span>
+        <span className="chev"><Icon path={ICON_CHEV} size={16} /></span>
+      </summary>
+      <div className="tool-body">{item.preview}</div>
+    </details>
+  );
+}
+
 function ExtDialog({ req, onRespond }: { req: ExtReq; onRespond: (r: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void }): React.ReactElement {
+  const { t } = useI18n();
   const [val, setVal] = useState(req.prefill ?? "");
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label={req.title ?? "Extension request"}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={req.title ?? t("extTitle")}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -684,13 +744,13 @@ function ExtDialog({ req, onRespond }: { req: ExtReq; onRespond: (r: { value?: s
           else onRespond({ value: val });
         }}
       >
-        <h2>{req.title ?? "Extension request"}</h2>
+        <h2>{req.title ?? t("extTitle")}</h2>
         {req.message && <p>{req.message}</p>}
         {req.method === "select" && req.options && (
           <label>
-            Choice
+            {t("choice")}
             <select value={val} onChange={(e) => setVal(e.target.value)}>
-              <option value="">— choose —</option>
+              <option value="">{t("choose")}</option>
               {req.options.map((o) => (
                 <option key={o} value={o}>{o}</option>
               ))}
@@ -699,7 +759,7 @@ function ExtDialog({ req, onRespond }: { req: ExtReq; onRespond: (r: { value?: s
         )}
         {(req.method === "input" || req.method === "editor") && (
           <label>
-            Value
+            {t("value")}
             {req.method === "editor" ? (
               <textarea value={val} onChange={(e) => setVal(e.target.value)} rows={6} placeholder={req.placeholder} />
             ) : (
@@ -707,17 +767,17 @@ function ExtDialog({ req, onRespond }: { req: ExtReq; onRespond: (r: { value?: s
             )}
           </label>
         )}
-        {req.method === "confirm" && <p>Confirm? This will not auto-confirm; you must choose.</p>}
+        {req.method === "confirm" && <p>{t("confirmQ")}</p>}
         <div className="modal-actions">
           {req.method === "confirm" ? (
             <>
-              <button type="submit" className="btn primary">Confirm</button>
-              <button type="button" className="btn" onClick={() => onRespond({ confirmed: false, cancelled: true })}>Cancel</button>
+              <button type="submit" className="btn primary">{t("confirm")}</button>
+              <button type="button" className="btn" onClick={() => onRespond({ confirmed: false, cancelled: true })}>{t("cancel")}</button>
             </>
           ) : (
             <>
-              <button type="submit" className="btn primary" disabled={req.method === "select" && !val}>Submit</button>
-              <button type="button" className="btn" onClick={() => onRespond({ cancelled: true })}>Dismiss</button>
+              <button type="submit" className="btn primary" disabled={req.method === "select" && !val}>{t("submit")}</button>
+              <button type="button" className="btn" onClick={() => onRespond({ cancelled: true })}>{t("dismiss")}</button>
             </>
           )}
         </div>
