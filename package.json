@@ -1,0 +1,50 @@
+{
+  "name": "pi-web-ui",
+  "version": "0.1.0",
+  "description": "Local private responsive web UI for the Pi coding agent",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,client \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch src/server/dev.ts",
+    "dev:client": "vite --config vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build --config vite.config.ts",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "preview": "vite preview",
+    "smoke:real": "node scripts/real-pi-smoke.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "express": "5.1.0",
+    "helmet": "8.1.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0",
+    "@types/express": "5.0.3",
+    "@types/node": "22.19.19",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "5.0.2",
+    "concurrently": "9.2.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "supertest": "7.1.1",
+    "@types/supertest": "6.0.3",
+    "tsx": "4.20.3",
+    "typescript": "5.9.2",
+    "vite": "7.1.7",
+    "vitest": "4.0.8"
+  }
+}

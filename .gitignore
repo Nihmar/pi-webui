@@ -1,0 +1,42 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# vite
+client/dist/
+
+# logs
+logs/
+*.log
+npm-debug.log*
+
+# env / secrets – never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Pi auth – never commit
+.pi/
+**/auth.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# test artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+coverage/
+
+# local tmp
+/tmp/
+*.tmp
