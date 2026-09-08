@@ -607,7 +607,7 @@ export default function App(): React.ReactElement {
                     value={composer}
                     onChange={(e) => setComposer(e.target.value)}
                     placeholder={busy ? t("composerBusy") : t("composerIdle")}
-                    rows={2}
+                    rows={1}
                     aria-label={t("ariaMessageInput")}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey && !isMobile) {

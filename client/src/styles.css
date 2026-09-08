@@ -269,9 +269,9 @@ details.rz[open] > summary .chev { transform: rotate(90deg); }
 .queue-bar .live { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; color: var(--warn); }
 .queue-bar .seg { display: inline-flex; gap: 6px; margin-left: auto; }
 .composer {
-  max-width: 800px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+  max-width: 800px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
   border: 1px solid var(--hair); border-radius: 24px; background: var(--surface-2);
-  padding: 7px 8px 7px 16px; transition: border-color 0.12s, box-shadow 0.12s;
+  padding: 6px 8px 6px 8px; transition: border-color 0.12s, box-shadow 0.12s;
 }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .composer textarea {
@@ -289,7 +289,7 @@ details.rz[open] > summary .chev { transform: rotate(90deg); }
 .composer .send.danger { background: var(--err); color: #fff; }
 .composer-hint { max-width: 800px; margin: 9px auto 0; text-align: center; font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
 
-.composer .composer-btn { flex: none; width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 50%; border: none; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; align-self: flex-end; }
+.composer .composer-btn { flex: none; width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 50%; border: none; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .composer .composer-btn:hover { background: var(--surface-3); color: var(--text); }
 .composer .composer-btn.on { color: var(--accent); background: var(--accent-dim); }
 

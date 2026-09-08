@@ -78,7 +78,7 @@ const en = {
   stop: "Stop",
   queueAction: "Queue",
   composerBusy: "Queue a follow-up or steer…",
-  composerIdle: "Send a message… (Enter to send, Shift+Enter newline)",
+  composerIdle: "Send a message…",
 
   renameTitle: "Rename chat",
   name: "Name",
@@ -168,7 +168,7 @@ const it: typeof en = {
   stop: "Ferma",
   queueAction: "Accoda",
   composerBusy: "Accoda un follow-up o correggi…",
-  composerIdle: "Scrivi un messaggio… (Invio per inviare, Shift+Invio a capo)",
+  composerIdle: "Scrivi un messaggio…",
 
   renameTitle: "Rinomina chat",
   name: "Nome",
